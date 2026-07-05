@@ -189,3 +189,41 @@ async def get_recent_ticks(
             symbol.upper(), str(minutes),
         )
     return [dict(row) for row in rows]
+
+
+async def get_signal_forward_prices(pool: asyncpg.Pool, horizon_minutes: int) -> list[dict]:
+    """
+    For every signal, find the entry price (last tick at/before the signal)
+    and the exit price (first tick at/after signal_time + horizon_minutes).
+
+    Used by the signal evaluation script to check whether signals actually
+    predict favorable forward price moves, before any decision layer is
+    built on top of them.
+    """
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                s.symbol,
+                s.signal_type,
+                s.value,
+                s.confidence_score,
+                entry.price AS entry_price,
+                exitp.price AS exit_price
+            FROM signals s
+            JOIN LATERAL (
+                SELECT price FROM ticks t
+                WHERE t.symbol = s.symbol AND t.time <= s.time
+                ORDER BY t.time DESC
+                LIMIT 1
+            ) entry ON true
+            JOIN LATERAL (
+                SELECT price FROM ticks t
+                WHERE t.symbol = s.symbol AND t.time >= s.time + ($1 || ' minutes')::INTERVAL
+                ORDER BY t.time ASC
+                LIMIT 1
+            ) exitp ON true
+            """,
+            str(horizon_minutes),
+        )
+    return [dict(row) for row in rows]

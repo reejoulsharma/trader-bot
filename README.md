@@ -96,8 +96,11 @@ tradingbot/
 │   └── pattern.py                 # Breakout / support detection
 ├── engine/
 │   └── signal_engine.py           # Runs analyzers over recent data, publishes Signals
+├── evaluation/
+│   └── signal_evaluation.py       # Checks whether signals predict favorable forward price moves
 └── tests/
-    └── test_normaliser.py         # Unit tests for the normaliser
+    ├── test_normaliser.py         # Unit tests for the normaliser
+    └── test_signal_evaluation.py  # Unit tests for signal evaluation
 ```
 
 ## Querying your data
@@ -127,10 +130,28 @@ FROM signals
 ORDER BY time DESC LIMIT 20;
 ```
 
+## Evaluating signal quality
+
+Before building a decision layer on top of the signal engine's output,
+check whether its signals actually predict favorable forward price moves:
+
+```bash
+python -m evaluation.signal_evaluation
+```
+
+For every signal in the `signals` table, this looks up the price at signal
+time and the price 5/15/60 minutes later, and prints a per-`(signal_type,
+value)` summary — sample count, mean/median forward return, and (for
+directional signals like sentiment and breakout/support) a win rate.
+Volume anomalies have no predicted direction, so those are reported by
+return magnitude only. You'll need the bot to have been running for a
+while first so there's enough signal + tick history to evaluate.
+
 ## Next steps (Phase 3)
 
-Phase 3 will consume signals from TimescaleDB/Redis to:
-- Combine multiple signals into an actual buy/sell decision
+Once signal evaluation shows which signals actually have edge, Phase 3
+will:
+- Combine the validated signals into an actual buy/sell decision
 - Apply risk management (position sizing, stop-loss)
 - Place and track orders through Angel One's trading API
-- Backtest strategies against historical tick data before running live
+- Backtest the combined strategy's P&L against historical tick data before running live
