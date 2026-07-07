@@ -20,7 +20,11 @@ class SignalEngine:
         self.sentiment_analyzer = FinBERTSentimentAnalyzer()
         self.volume_analyzer = VolumeAnomalyDetector(window_size=20, spike_threshold=2.0)
         self.pattern_analyzer = PricePatternAnalyzer()
-        
+
+        # Tracks the last article URL we ran sentiment on, per symbol, so we
+        # don't re-analyse (and re-signal) the same article every cycle.
+        self._last_sentiment_url: dict[str, str] = {}
+
     async def fetch_recent_ticks(self, symbol: str, count: int = 50) -> pd.DataFrame:
         """Fetch recent ticks from redis stream for a symbol and return as DataFrame."""
         # Using XREVRANGE to get recent messages. In a large production system, 
@@ -63,8 +67,13 @@ class SignalEngine:
             return
             
         latest_news = news[0]  # Just analyze the latest one
+        url = latest_news.get("url", "")
+        if url and url == self._last_sentiment_url.get(symbol):
+            return  # already analysed this article for this symbol
+        self._last_sentiment_url[symbol] = url
+
         text = latest_news.get("title", "") + " " + latest_news.get("description", "")
-        
+
         # Run inference in a thread to not block the event loop
         result = await asyncio.to_thread(self.sentiment_analyzer.analyze, text)
         
