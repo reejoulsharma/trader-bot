@@ -12,11 +12,20 @@ Run with:  python -m evaluation.signal_evaluation
 """
 
 import asyncio
+import sys
 
 import pandas as pd
 from loguru import logger
 
 from storage.timescale import get_db_pool, get_signal_forward_prices
+
+# Windows consoles default to a codepage (e.g. cp1252) that can't encode the
+# em dashes used in log/print messages below — force UTF-8 on both streams
+# (loguru's default handler writes to stderr, not stdout) so they render
+# correctly instead of as replacement characters.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 DEFAULT_HORIZONS_MINUTES = (5, 15, 60)
 
