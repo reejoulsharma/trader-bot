@@ -1,0 +1,22 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: tradingbot
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./docker/init-timescaledb.sql:/docker-entrypoint-initdb.d/init-timescaledb.sql
+
+volumes:
+  redis_data:
+  timescale_data:

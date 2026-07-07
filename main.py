@@ -26,6 +26,12 @@ from engine.signal_engine import SignalEngine
 
 
 def configure_logging():
+    # Windows consoles default to a codepage (e.g. cp1252) that can't encode
+    # the ✓/⚠ characters used in log messages below — force UTF-8 so those
+    # don't raise UnicodeEncodeError inside the logging handler.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     logger.remove()
     logger.add(
         sys.stdout,
@@ -39,6 +45,7 @@ def configure_logging():
         rotation="10 MB",
         retention="7 days",
         format="{time:YYYY-MM-DD HH:mm:ss} | {level:<8} | {name}:{line} — {message}",
+        encoding="utf-8",
     )
 
 

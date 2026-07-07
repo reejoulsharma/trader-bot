@@ -19,8 +19,8 @@ Signal Engine (FinBERT sentiment, volume anomaly, breakout/support)
 ## Prerequisites
 
 - Python 3.11+
-- Redis running locally (`redis-server`)
-- PostgreSQL with TimescaleDB extension
+- Redis and PostgreSQL with the TimescaleDB extension — either running
+  locally, or via the included `docker-compose.yml` (see below)
 - An Angel One SmartAPI account (API key, client code, PIN, TOTP secret) —
   needed for the real-time price stream. News (Google News RSS) and
   fundamentals (Screener.in) are scraped directly and need no API key.
@@ -43,7 +43,13 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your actual keys
 
-# 5. Create the database
+# 5. Start Redis + TimescaleDB
+# Option A — Docker (requires Docker Desktop / WSL2):
+docker compose up -d
+# This creates the `tradingbot` database and the timescaledb extension
+# automatically on first start (see docker/init-timescaledb.sql).
+
+# Option B — already have Redis/Postgres running locally:
 psql -U postgres -c "CREATE DATABASE tradingbot;"
 psql -U postgres -d tradingbot -c "CREATE EXTENSION IF NOT EXISTS timescaledb;"
 
