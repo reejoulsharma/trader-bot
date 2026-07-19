@@ -47,5 +47,10 @@ class Config:
     # Reconnection backoff
     MAX_RECONNECT_DELAY: int = 60
 
+    # Max seconds to wait for the Angel One WebSocket to open (connect +
+    # subscribe) before giving up and letting the outer reconnect/backoff
+    # loop retry. Normally opens in ~1-2s; this is just a backstop.
+    WS_CONNECT_TIMEOUT: int = 30
+
 
 settings = Config()

@@ -8,6 +8,7 @@ Includes exponential backoff reconnection.
 """
 
 import asyncio
+import threading
 from loguru import logger
 import httpx
 import pyotp
@@ -100,22 +101,42 @@ class PriceStream:
         # Need to create a bridge between synchronous callback and our async process
         queue = asyncio.Queue()
         loop = asyncio.get_running_loop()
+        connected = asyncio.Event()
 
         def on_message(ws, message):
             asyncio.run_coroutine_threadsafe(queue.put(message), loop)
 
         def on_open(ws):
             logger.info("Angel One WebSocket connected.")
-            # Mode 1 is LTP.
+            loop.call_soon_threadsafe(connected.set)
+            # Mode 1 is LTP. NOTE: subscribe() lives on the SmartWebSocketV2
+            # wrapper (sws), not on the raw WebSocketApp instance (ws) that
+            # this callback receives — calling ws.subscribe(...) raises
+            # AttributeError, which the library silently treats as a
+            # connection error and retries on.
             token_list = [{"exchangeType": 1, "tokens": list(self.symbol_to_token.values())}]
-            ws.subscribe("price-stream-id", 1, token_list)
+            sws.subscribe("price-stream-id", 1, token_list)
             logger.info(f"Subscribed to {token_list}")
 
         def on_error(ws, error):
-            logger.error(f"Angel One WebSocket error: {error}")
-            
+            # websocket-client raises WebSocketBadStatusException (with
+            # status_code/resp_headers) when the server rejects the HTTP
+            # upgrade outright — surface that if present, since it's the
+            # clearest signal of *why* Angel One refused the connection
+            # (e.g. 403 for an IP/auth issue, 429 for rate limiting).
+            detail = f"{type(error).__name__}: {error}"
+            status_code = getattr(error, "status_code", None)
+            if status_code is not None:
+                detail += f" | HTTP status={status_code}"
+            resp_headers = getattr(error, "resp_headers", None)
+            if resp_headers:
+                detail += f" | headers={dict(resp_headers)}"
+            logger.error(f"Angel One WebSocket error: {detail}")
+
         def on_close(ws, close_status_code, close_msg):
-            logger.warning(f"Angel One WebSocket closed: {close_msg}")
+            logger.warning(
+                f"Angel One WebSocket closed: code={close_status_code} msg={close_msg}"
+            )
             # put a sentinel to exit the queue
             asyncio.run_coroutine_threadsafe(queue.put(None), loop)
 
@@ -126,16 +147,42 @@ class PriceStream:
             feed_token
         )
 
+        # smartapi-python 1.3.5 hardcodes a plain ws:// (port 80) endpoint.
+        # Angel One's infrastructure no longer accepts connections on port
+        # 80 at all (confirmed via raw TCP test — 80 fails, 443 succeeds),
+        # so override to the secure wss:// endpoint on port 443.
+        sws.ROOT_URI = "wss://smartapisocket.angelone.in/smart-stream"
+
         sws.on_open = on_open
         sws.on_message = on_message
         sws.on_error = on_error
         sws.on_close = on_close
 
-        # sws.connect() is blocking. Run in thread.
-        ws_task = asyncio.to_thread(sws.connect)
+        # sws.connect() is blocking, so it needs to run off the event loop
+        # thread. IMPORTANT: use a plain threading.Thread here, not
+        # asyncio.to_thread()/loop.run_in_executor(). Root-caused via
+        # isolated testing: running SmartWebSocketV2.connect() through
+        # asyncio's default executor reliably hangs forever with no error
+        # (confirmed hanging 6+ minutes in isolation), while the exact
+        # same call on a plain thread connects in ~1-2s. The interaction
+        # between asyncio's executor threads and this library's blocking
+        # socket/SSL handling is broken; a plain thread sidesteps it.
+        ws_thread = threading.Thread(target=sws.connect, daemon=True)
+        ws_thread.start()
 
         logger.info("Starting WebSocket message processor...")
         try:
+            try:
+                await asyncio.wait_for(
+                    connected.wait(), timeout=settings.WS_CONNECT_TIMEOUT
+                )
+            except asyncio.TimeoutError:
+                raise ConnectionError(
+                    f"Angel One WebSocket did not open within "
+                    f"{settings.WS_CONNECT_TIMEOUT}s (check IP whitelist / "
+                    "network connectivity)"
+                )
+
             while True:
                 msg = await queue.get()
                 if msg is None: # Closed
@@ -149,11 +196,7 @@ class PriceStream:
                 sws.close_connection()
             except Exception:
                 pass
-            # wait for task to complete if we cancelled
-            try:
-                await asyncio.wait_for(ws_task, timeout=5.0)
-            except asyncio.TimeoutError:
-                pass
+            ws_thread.join(timeout=5.0)
 
     async def run(self):
         """Run the price stream with exponential backoff reconnection."""
