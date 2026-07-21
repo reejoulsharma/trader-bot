@@ -191,6 +191,29 @@ async def get_recent_ticks(
     return [dict(row) for row in rows]
 
 
+async def get_recent_signals(
+    pool: asyncpg.Pool,
+    symbol: str,
+    minutes: int = 30,
+) -> list[dict]:
+    """
+    Fetch all signals for a symbol in the last N minutes.
+    Used by the decision engine to score a symbol's current outlook.
+    """
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT time, signal_type, value, confidence_score
+            FROM signals
+            WHERE symbol = $1
+              AND time >= NOW() - ($2 || ' minutes')::INTERVAL
+            ORDER BY time ASC
+            """,
+            symbol.upper(), str(minutes),
+        )
+    return [dict(row) for row in rows]
+
+
 async def get_signal_forward_prices(pool: asyncpg.Pool, horizon_minutes: int) -> list[dict]:
     """
     For every signal, find the entry price (last tick at/before the signal)
