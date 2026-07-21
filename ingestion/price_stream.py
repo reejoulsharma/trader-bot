@@ -103,7 +103,7 @@ class PriceStream:
         loop = asyncio.get_running_loop()
         connected = asyncio.Event()
 
-        def on_message(ws, message):
+        def on_data(ws, message):
             asyncio.run_coroutine_threadsafe(queue.put(message), loop)
 
         def on_open(ws):
@@ -154,7 +154,12 @@ class PriceStream:
         sws.ROOT_URI = "wss://smartapisocket.angelone.in/smart-stream"
 
         sws.on_open = on_open
-        sws.on_message = on_message
+        # NOTE: incoming tick data flows through on_data, not on_message —
+        # SmartWebSocketV2 only wires on_data into the underlying
+        # WebSocketApp (see connect()); on_message is dead code in this
+        # library version, so setting sws.on_message here would silently
+        # never fire and every tick would be discarded.
+        sws.on_data = on_data
         sws.on_error = on_error
         sws.on_close = on_close
 
