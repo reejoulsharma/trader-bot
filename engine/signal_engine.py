@@ -88,10 +88,14 @@ class SignalEngine:
             await self.publish_signal(signal)
 
     async def process_price_and_volume(self, symbol: str):
-        df = await self.fetch_recent_ticks(symbol, count=30)
+        # detect_breakout/detect_support use a time-based lookback (up to
+        # 15 minutes), not a row count — at ~1 tick/sec this needs a
+        # generous pull to make sure that much real history is actually
+        # present in the DataFrame, not just the last few seconds of it.
+        df = await self.fetch_recent_ticks(symbol, count=1000)
         if df.empty:
             return
-            
+
         # 1. Volume Anomaly
         is_volume_spike = self.volume_analyzer.analyze(df)
         if is_volume_spike:
@@ -102,9 +106,9 @@ class SignalEngine:
                 value="anomaly",
             )
             await self.publish_signal(signal)
-            
+
         # 2. Pattern Analysis
-        if self.pattern_analyzer.detect_breakout(df):
+        if self.pattern_analyzer.detect_breakout(df, window_minutes=15):
             signal = Signal(
                 symbol=symbol,
                 timestamp=datetime.now(timezone.utc),
@@ -113,7 +117,7 @@ class SignalEngine:
             )
             await self.publish_signal(signal)
             
-        if self.pattern_analyzer.detect_support(df):
+        if self.pattern_analyzer.detect_support(df, window_minutes=10):
             signal = Signal(
                 symbol=symbol,
                 timestamp=datetime.now(timezone.utc),
