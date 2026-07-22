@@ -29,13 +29,34 @@ class StreamConsumer:
     def __init__(self, redis_client: aioredis.Redis, db_pool: asyncpg.Pool):
         self.redis = redis_client
         self.db = db_pool
-        # Track the last-read ID per stream ($ = only new messages from now)
+        # Placeholder keys only — prepare() MUST be awaited before run() (and
+        # before any producer task starts) to resolve these to real IDs.
         self.cursors = {
             settings.STREAM_TICKS: "$",
             settings.STREAM_NEWS: "$",
             settings.STREAM_FUNDAMENTALS: "$",
             settings.STREAM_SIGNALS: "$",
         }
+
+    async def prepare(self):
+        """
+        Resolve each stream's current last ID as our starting cursor.
+
+        The symbolic "$" cursor only means "the stream's last ID" at the
+        moment XREAD actually executes inside run()'s loop — and that can
+        run arbitrarily late relative to when producer tasks start
+        publishing, since asyncio doesn't guarantee scheduling order.
+        Anything published in that gap is silently lost forever (confirmed
+        live: fundamentals for 2 of 3 watchlist symbols vanished this way
+        on startup). Resolving concrete IDs here, and awaiting this before
+        any producer task is created, makes that gap impossible: producers
+        can't publish anything before this method has already fixed the
+        cutoff.
+        """
+        for stream in self.cursors:
+            last = await self.redis.xrevrange(stream, count=1)
+            self.cursors[stream] = last[0][0] if last else "0"
+        logger.info(f"Stream consumer cursors initialized: {self.cursors}")
 
     async def _handle_tick(self, payload: str):
         tick = Tick.model_validate_json(payload)
@@ -93,6 +114,8 @@ class StreamConsumer:
         """
         Continuously read from all streams and write to the database.
         Uses XREAD with block=500ms so it doesn't spin when streams are empty.
+
+        Requires prepare() to have already been awaited — see its docstring.
         """
         logger.info("Stream consumer started — listening for data...")
 

@@ -93,12 +93,18 @@ async def main():
     consumer = StreamConsumer(redis_client=redis, db_pool=db_pool)
     signal_engine = SignalEngine(redis_client=redis)
 
+    # Resolve the consumer's starting position in every stream BEFORE any
+    # producer task exists to publish to them — otherwise messages
+    # published in the startup race are silently lost forever. See
+    # StreamConsumer.prepare()'s docstring for what this fixes.
+    await consumer.prepare()
+
     # ── Launch all tasks concurrently ──────────────────────────────────────────
     tasks = [
+        asyncio.create_task(consumer.run(), name="consumer"),
         asyncio.create_task(price_stream.run(), name="price_stream"),
         asyncio.create_task(news_poller.run(), name="news_poller"),
         asyncio.create_task(fundamentals_poller.run(), name="fundamentals_poller"),
-        asyncio.create_task(consumer.run(), name="consumer"),
         asyncio.create_task(signal_engine.run(), name="signal_engine"),
     ]
 
