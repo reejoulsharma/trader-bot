@@ -43,11 +43,39 @@ IST = ZoneInfo("Asia/Kolkata")
 # most recent occurrence of each within the lookback window counts, so a
 # persistent condition re-detected every engine cycle doesn't dominate the
 # score just because it kept getting re-observed.
+#
+# Recalibrated from evaluation.signal_evaluation output run against ~1 week
+# of live signals (see git history for the exact run). Original weights
+# were educated guesses made before any real data existed; these replace
+# them with what the data actually showed:
+#   - sentiment:positive flipped bullish -> bearish (-1.5, was +1.0): 24-28%
+#     win rate, consistently negative mean return at every horizon (5/15/60
+#     min). Small sample (n=29) but directionally consistent across all
+#     three independent horizons, which is what makes it trustworthy
+#     despite the modest count — noise doesn't usually agree with itself
+#     three times in a row.
+#   - pattern:support flipped bullish -> bearish (-0.75, was +0.75): ~41%
+#     win rate, consistently negative, at every horizon, backed by a huge
+#     sample (~4,000) — a milder edge than sentiment but very high
+#     confidence it's real given the sample size.
+#   - pattern:breakout stays bullish but reduced (+1.0, was +1.5): genuine
+#     edge at 5-15 min (55-67% win rate) fading to worse-than-random by 60
+#     min, on a small sample (n~27) — real but not strong evidence.
+#   - sentiment:negative stays bearish but heavily discounted (-0.25, was
+#     -1.0): win rate bounces both sides of 50% across horizons
+#     (37.5/62.5/40.0), small sample (n~16) — no real evidence either way,
+#     kept as a weak prior rather than zeroed out entirely.
+#
+# Practical consequence: pattern:breakout is now the only bullish-weighted
+# signal, and its solo weight no longer crosses BUY_THRESHOLD alone — BUY
+# effectively requires breakout plus a volume anomaly together. This is
+# intentional, not a bug: the data doesn't support confident BUY calls
+# right now, so the model shouldn't produce them just to seem balanced.
 SIGNAL_WEIGHTS: dict[tuple[str, str], float] = {
-    ("sentiment", "positive"): 1.0,
-    ("sentiment", "negative"): -1.0,
-    ("pattern", "breakout"): 1.5,
-    ("pattern", "support"): 0.75,
+    ("sentiment", "positive"): -1.5,
+    ("sentiment", "negative"): -0.25,
+    ("pattern", "breakout"): 1.0,
+    ("pattern", "support"): -0.75,
 }
 
 # volume:anomaly has no direction — it amplifies whatever directional score
